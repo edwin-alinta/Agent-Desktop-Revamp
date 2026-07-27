@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Desktop — Customer &amp; Account Verification Uplift (Prototype)</title>
+  <!--
+    PROTOTYPE SCOPE
+    ---------------
+    This HTML mimics the Genesys Cloud Agent Workspace as it appears today at Alinta
+    (see /Agent Desktop screenshot.png). Only the CENTRAL PILLAR beneath the
+    "Call Interaction" widget header is redesigned.
+
+    All new components in the central pillar are constrained to primitives that
+    Genesys Cloud Scripter natively supports and that we verified are already in
+    production use in these live scripts:
+
+      - EC - FV_AAP_AADDR_MTWC_SSIVR   (script id c7cf087f-e350-40e5-9a3e-25daae1e05cd)
+      - EC PVE validation script       (script id e476c138-f31a-4020-8f5d-ab95bd373fdb)
+
+    Supported script primitives used:
+      - verticalStackContainer / horizontalStackContainer  (layout)
+      - text            (static + interpolated {{variable}} / {{scripter.*}} tokens)
+      - input           (bound to a script variable)
+      - button          (invokes: Data Action, screen pop, page navigation, set variable)
+      - image
+      - webPage         (embedded iframe, e.g. MTWC)
+
+    NOT USED (unsupported by native scripter): radio groups, tabs, dropdowns,
+    modal dialogs, drag/drop. The two "search modes" below therefore render as
+    two stacked input+button groups exactly like the live validation script does.
+  -->
+  <style>
+    :root{
+      --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --line-strong:#d1d5db;
+      --canvas:#f4f5f7; --panel:#ffffff; --chrome:#ffffff;
+      --brand-orange:#ef7a1a; --brand-green:#0f7c66; --brand-green-soft:#e6f4f1;
+      --blue:#2b7fb0; --blue-soft:#eaf4fa; --blue-dark:#1c5d84;
+      --grey-head:#d9dcdf; --grey-panel:#f0f1f2; --state-connected:#c9ecc9;
+      --amber:#9a6700; --amber-soft:#fff4d6; --amber-border:#e6ca72;
+      --red:#b42318; --red-soft:#fee4e2; --red-border:#f4b4ad;
+      --green:#177a4c; --green-soft:#eaf7ef; --green-border:#9bd2b3;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%;font-family:"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--canvas);font-size:13.5px}
+    button,input{font:inherit}
+    button{cursor:pointer}
+    .hidden{display:none!important}
+
+    /* ============ AGENT DESKTOP CHROME (unchanged from live) ============ */
+    .app{display:grid;grid-template-rows:auto auto 1fr;min-height:100vh}
+    .topbar{background:var(--chrome);border-bottom:1px solid var(--line);display:grid;grid-template-columns:auto auto 1fr auto;gap:14px;align-items:center;padding:8px 14px;height:52px}
+    .logo{width:28px;height:28px;border-radius:6px;background:var(--brand-orange);display:grid;place-items:center;color:#fff;font-weight:800;font-size:14px}
+    .menu-btn{background:#eef2fb;border:1px solid #dfe6f2;color:#3453a1;border-radius:6px;padding:6px 12px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+    .search{background:#f4f5f7;border:1px solid var(--line);border-radius:8px;height:34px;display:flex;align-items:center;padding:0 12px;color:#8a94a3;max-width:560px}
+    .search::before{content:"⌕";margin-right:8px;color:#8a94a3;font-size:16px}
+    .top-actions{display:flex;align-items:center;gap:10px}
+    .pill{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;color:#334;font-weight:500}
+    .pill.workspace{background:#e6f4f1;color:#0f7c66;border-color:#bfe3d9;font-weight:700;position:relative}
+    .pill.workspace .badge{position:absolute;top:-6px;right:-6px;background:#e64c4c;color:#fff;border-radius:50%;width:16px;height:16px;font-size:11px;display:grid;place-items:center;font-weight:700}
+    .toggle{display:inline-flex;align-items:center;gap:8px;color:#334}
+    .toggle .knob{width:36px;height:20px;border-radius:12px;background:#2b7fb0;position:relative}
+    .toggle .knob::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;background:#fff;border-radius:50%}
+    .avatar{width:30px;height:30px;border-radius:50%;background:#7a2e2e;color:#fff;display:grid;place-items:center;font-weight:700;font-size:12px}
+
+    /* ============ INTERACTION CHIP STRIP (unchanged from live) ============ */
+    .chipbar{background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:8px 14px;min-height:52px}
+    .call-chip{display:flex;align-items:center;gap:10px}
+    .call-chip .ico{width:28px;height:28px;border-radius:50%;background:#f4f5f7;display:grid;place-items:center;color:#334;font-size:14px}
+    .call-chip .who{font-weight:600}
+    .call-chip .who small{display:block;color:var(--muted);font-weight:500;font-size:11px}
+    .call-actions{display:flex;align-items:center;gap:6px;margin-left:8px}
+    .ctl{width:32px;height:32px;border-radius:6px;border:1px solid var(--line);background:#fff;display:grid;place-items:center;color:#334}
+    .ctl.hang{background:#e64c4c;color:#fff;border-color:#e64c4c}
+    .chipbar .spacer{flex:1}
+    .win-controls{display:flex;gap:4px;color:#8a94a3}
+    .win-controls span{padding:4px 6px;cursor:default}
+
+    /* ============ WORKSPACE (3 columns like live) ============ */
+    .workspace{display:grid;grid-template-columns:230px minmax(0,1fr) 240px;gap:0;min-height:0;height:100%}
+    .conv-panel{background:#fff;border-right:1px solid var(--line);padding:10px}
+    .conv-head{display:flex;align-items:center;justify-content:space-between;color:#334;font-weight:600;padding:4px 6px 10px}
+    .conv-head .icons{display:flex;gap:8px;color:#556}
+    .conv-head .icons span{padding:2px}
+    .conv-card{background:#f4f5f7;border:1px solid transparent;border-radius:8px;padding:10px;margin-bottom:8px}
+    .conv-card.active{border-color:#c9d6e2;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .conv-card .title{font-weight:600}
+    .conv-card .queue{margin-top:8px;background:#e9f2f9;border-radius:6px;padding:6px 8px;display:flex;align-items:center;gap:6px;color:#264d67;font-weight:600;font-size:12px}
+
+    .center-col{background:var(--canvas);padding:12px;overflow:auto}
+    .widget{background:#fff;border:1px solid var(--line);border-radius:6px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+    .widget-head{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);background:#fff}
+    .widget-head .title{display:flex;align-items:center;gap:8px;font-weight:600;color:#243}
+    .widget-head .icons{display:flex;gap:6px;color:#7a8493}
+    .widget-head .icons span{padding:3px 6px;cursor:default}
+
+    /* Top table row exactly like live script */
+    .txn-table{display:grid;grid-template-columns:repeat(6,1fr);border-bottom:1px solid var(--line)}
+    .txn-cell{padding:8px 10px;border-right:1px solid var(--line);font-size:12.5px}
+    .txn-cell:last-child{border-right:0}
+    .txn-cell .lbl{color:#4b5563;font-weight:600;margin-bottom:4px}
+    .txn-cell .val{color:#111;font-family:Consolas,Menlo,monospace;font-size:12px;background:#fff}
+    .txn-cell.state .val{background:var(--state-connected);border-radius:3px;padding:2px 6px;display:inline-block}
+
+    /* ============ CENTRAL PILLAR (redesigned area) ============ */
+    .pillar{padding:14px;display:grid;gap:14px}
+
+    .section-band{background:var(--grey-head);color:#243;font-weight:700;padding:8px 12px;font-size:13px;letter-spacing:.01em}
+    .section-body{padding:12px 14px;background:#fff}
+
+    /* Layout blocks that render as horizontal/vertical stacks in Scripter */
+    .two-col{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
+    .three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+
+    /* IVR context rows (unchanged in spirit — read-only text nodes) */
+    .kv{display:grid;grid-template-columns:170px 1fr;gap:6px 10px;font-size:12.5px}
+    .kv .k{color:#334;font-weight:500}
+    .kv .v{color:#111;font-family:Consolas,Menlo,monospace;font-size:12px;min-height:16px;border-bottom:1px dotted #e5e7eb;padding-bottom:2px}
+
+    /* Verification pillar */
+    .verif{border:1px solid var(--line);border-radius:6px;overflow:hidden}
+    .verif-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--grey-head)}
+    .verif-head .title{font-weight:700;color:#243;display:flex;align-items:center;gap:8px}
+    .verif-head .status{font-size:12px;font-weight:700;padding:3px 8px;border-radius:99px;background:#fff;border:1px solid var(--line);color:#334}
+    .verif-head .status.pass{background:var(--green-soft);border-color:var(--green-border);color:var(--green)}
+    .verif-head .status.fail{background:var(--red-soft);border-color:var(--red-border);color:var(--red)}
+    .verif-head .status.pending{background:var(--amber-soft);border-color:var(--amber-border);color:var(--amber)}
+
+    .banner{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);align-items:flex-start;font-size:13px}
+    .banner .ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;flex:0 0 auto}
+    .banner b{display:block;margin-bottom:2px}
+    .banner.info{background:var(--blue-soft)} .banner.info .ico{background:var(--blue)}
+    .banner.warn{background:var(--amber-soft)} .banner.warn .ico{background:var(--amber)}
+    .banner.pass{background:var(--green-soft)} .banner.pass .ico{background:var(--green)}
+    .banner.fail{background:var(--red-soft)} .banner.fail .ico{background:var(--red)}
+
+    .verif-body{padding:12px}
+
+    /* Two side-by-side lookup groups — each is one Scripter input+button stack */
+    .lookup-group{border:1px solid var(--line);border-radius:6px;padding:12px;background:#fbfcfd}
+    .lookup-group h4{margin:0 0 4px;font-size:13px;color:#243}
+    .lookup-group .hint{color:var(--muted);font-size:11.5px;margin-bottom:10px}
+    .fld{margin-bottom:10px}
+    .fld label{display:block;font-size:12px;font-weight:600;color:#334;margin-bottom:4px}
+    .fld input{width:100%;height:34px;border:1px solid var(--line-strong);border-radius:5px;padding:6px 9px;background:#fff}
+    .fld input:focus{outline:2px solid #d9ecf7;border-color:var(--blue)}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+
+    .btn{border-radius:5px;padding:7px 12px;font-weight:600;border:1px solid transparent;min-height:32px}
+    .btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+    .btn.primary:hover{background:var(--blue-dark);border-color:var(--blue-dark)}
+    .btn.secondary{background:#fff;border-color:var(--line-strong);color:#243}
+    .btn.secondary:hover{background:#f4f5f7}
+    .btn.danger{background:#fff;border-color:var(--red);color:var(--red)}
+    .btn.link{background:transparent;border:0;color:var(--blue-dark);text-decoration:underline;padding:0;font-weight:600;min-height:0}
+    .btn:disabled{background:#eef0f3!important;color:#98a2b3!important;border-color:#dfe3e8!important;cursor:not-allowed}
+
+    /* Result panel shown after a Scripter Data Action returns */
+    .result{margin-top:10px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:10px}
+    .result .r-title{font-size:12px;color:#334;font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+    .result table{width:100%;border-collapse:collapse;font-size:12.5px}
+    .result th,.result td{text-align:left;padding:5px 6px;border-bottom:1px solid #eef1f4}
+    .result th{color:#4b5563;font-weight:600;background:#fafbfc}
+    .result td.action{text-align:right;width:1%;white-space:nowrap}
+
+    /* Servicing actions (right column) */
+    .service-list{display:flex;flex-direction:column;gap:8px}
+    .service-list .band{background:var(--grey-head);color:#243;font-weight:700;padding:6px 10px;font-size:12.5px}
+    .service-list .band.orange{background:#f0f1f2}
+    .service-btn{width:100%;background:var(--blue-soft);border:1px solid #b7d5e6;color:var(--blue-dark);border-radius:4px;padding:8px 10px;font-weight:600;text-align:left}
+    .service-btn.orange{background:#f8b26a;border-color:#e2933b;color:#5c3410}
+    .service-btn:disabled{opacity:.55;filter:grayscale(.4)}
+
+    /* Additional notes bottom bar (matches live script Submit row) */
+    .notes-row{display:grid;grid-template-columns:120px 1fr auto;gap:10px;align-items:end;padding:12px 14px;border-top:1px solid var(--line);background:#fff}
+    .notes-row textarea{width:100%;min-height:60px;border:1px solid var(--line-strong);border-radius:5px;padding:8px;resize:vertical;font-family:inherit}
+
+    /* Right sidebar tools (unchanged from live) */
+    .tools-col{background:#fff;border-left:1px solid var(--line);padding:12px;display:flex;flex-direction:column;align-items:center;gap:14px;color:var(--muted)}
+    .tools-header{width:100%;display:flex;align-items:center;justify-content:space-between;color:#334}
+    .tools-header .icons{display:flex;gap:10px;font-size:16px;color:#556}
+    .tools-empty{color:#8a94a3;text-align:center;font-size:13px;margin-top:80px;line-height:1.55}
+    .tools-empty::before{content:"↗";display:block;font-size:34px;color:#c0c8d3;margin-bottom:12px}
+
+    /* Demo bar (out-of-band control not part of the deliverable) */
+    .demo-bar{position:sticky;top:0;z-index:30;background:#1f2937;color:#fff;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:8px 14px;font-size:12.5px}
+    .demo-bar .lbl{opacity:.7}
+    .demo-bar .seg{display:inline-flex;background:#111827;border-radius:6px;padding:2px}
+    .demo-bar .seg button{background:transparent;border:0;color:#cbd5e1;padding:5px 10px;border-radius:4px;font-weight:600}
+    .demo-bar .seg button.active{background:#fff;color:#111;font-weight:700}
+    .demo-bar .right{display:flex;align-items:center;gap:10px}
+    .demo-bar .reset{background:transparent;border:1px solid #4b5563;color:#fff;border-radius:5px;padding:5px 10px}
+
+    .primitive-note{font-size:11px;color:var(--muted);border:1px dashed var(--line-strong);border-radius:4px;padding:6px 8px;background:#fafbfc}
+    .primitive-note code{background:#eef2f7;border-radius:3px;padding:1px 4px;font-size:11px;color:#243}
+
+    .toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,20px);background:#111827;color:#fff;padding:10px 16px;border-radius:6px;opacity:0;pointer-events:none;transition:.18s;z-index:100;font-size:13px}
+    .toast.show{opacity:.95;transform:translate(-50%,0)}
+
+    /* ============ NEW: multi-page pillar behaviour ============ */
+    .page{display:block}
+    .page.hidden{display:none!important}
+
+    /* Attempt counter chip (shown between pillar and verify card) */
+    .attempt-chip{display:inline-flex;align-items:center;gap:8px;background:var(--amber-soft);border:1px solid var(--amber-border);color:var(--amber);border-radius:99px;padding:4px 12px;font-size:12.5px;font-weight:700;align-self:flex-start}
+    .attempt-chip.hidden{display:none}
+    .attempt-chip.exhausted{background:var(--red-soft);border-color:var(--red-border);color:var(--red)}
+
+    /* ANI-prefill hint under phone input */
+    .prefill-note{margin-top:4px;color:var(--blue-dark);font-size:11px;font-style:italic}
+
+    /* IVR "did not validate" empty state */
+    .ivr-empty-note{margin-top:10px;padding:10px;background:#f4f5f7;border:1px dashed var(--line-strong);border-radius:6px;color:#334;font-size:12.5px;display:flex;gap:8px;align-items:flex-start}
+    .ivr-empty-note .ico{color:var(--blue);font-weight:800}
+
+    /* Servicing-locked-until-verified message on verify page */
+    .service-locked-msg{display:flex;gap:12px;align-items:flex-start;padding:16px;background:#f4f5f7;border:1px dashed var(--line-strong);border-radius:6px}
+    .service-locked-msg .ico{font-size:22px}
+
+    /* Verified strip on servicing page */
+    .verified-strip{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--green-soft);border:1px solid var(--green-border);border-radius:6px;padding:10px 14px}
+    .verified-strip.restricted{background:var(--amber-soft);border-color:var(--amber-border)}
+    .verified-strip .v-left{display:flex;align-items:center;gap:12px}
+    .verified-strip .v-tick{width:28px;height:28px;border-radius:50%;background:var(--green);color:#fff;display:grid;place-items:center;font-weight:900}
+    .verified-strip.restricted .v-tick{background:var(--amber)}
+    .verified-strip b{display:block;color:var(--green);margin-bottom:2px}
+    .verified-strip.restricted b{color:var(--amber)}
+    .verified-strip .v-left span{color:#243;font-size:12.5px}
+    .verified-strip .v-right{display:flex;align-items:center;gap:12px}
+    .verified-strip .v-tag{background:#fff;border:1px solid var(--green-border);color:var(--green);border-radius:99px;padding:3px 10px;font-size:11.5px;font-weight:700;transition:.15s}
+    .verified-strip .v-tag.popped{background:var(--green);color:#fff}
+    .verified-strip.restricted .v-tag{border-color:var(--amber-border);color:var(--amber)}
+
+    /* Unable-to-verify page */
+    .unable-hero{display:flex;gap:12px;align-items:flex-start;background:var(--red-soft);border:1px solid var(--red-border);border-radius:6px;padding:14px}
+    .unable-hero .hero-icon{width:32px;height:32px;border-radius:50%;background:var(--red);color:#fff;display:grid;place-items:center;font-weight:900;font-size:18px;flex:0 0 auto}
+    .unable-hero b{display:block;color:var(--red);margin-bottom:4px;font-size:14px}
+    .unable-hero div.body{color:#243;font-size:12.5px}
+    .attempts{width:100%;border-collapse:collapse;font-size:12.5px}
+    .attempts th,.attempts td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
+    .attempts th{color:#4b5563;font-weight:600;background:#fafbfc}
+    .unable-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .unable-card{text-align:left;background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px;transition:.14s;font:inherit;cursor:pointer}
+    .unable-card:hover{border-color:var(--blue);box-shadow:0 2px 6px rgba(0,0,0,.05)}
+    .unable-card .hd{font-weight:700;color:#243;font-size:13px;display:flex;align-items:center;gap:8px;margin-bottom:4px}
+    .unable-card .bd{color:#334;font-size:12px;line-height:1.45}
+    .unable-card.danger{border-color:var(--red-border)}
+    .unable-card.danger .hd{color:var(--red)}
+    .future-tag{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-border);border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+
+    /* Restricted-mode servicing overlay marker */
+    .service-list.restricted .service-btn:not(.orange):not(.allow-restricted){opacity:.5;filter:grayscale(.5);pointer-events:none}
+
+    /* Demo bar: page indicator + third scenario button */
+    .demo-bar .page-ind{background:#111827;color:#cbd5e1;border-radius:6px;padding:4px 10px;font-size:11.5px;border:1px solid #4b5563}
+    .demo-bar .page-ind b{color:#fff}
+
+    @media (max-width:1200px){
+      .workspace{grid-template-columns:1fr}
+      .conv-panel,.tools-col{display:none}
+      .two-col{grid-template-columns:1fr}
+      .three-col{grid-template-columns:1fr}
+      .unable-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================ DEMO CONTROL BAR (out of band) ================ -->
+  <div class="demo-bar" role="region" aria-label="Prototype demo controls">
+    <div><span class="lbl">Scenario:</span></div>
+    <div class="seg" role="group" aria-label="Scenario">
+      <button id="scnIvr">IVR verified</button>
+      <button id="scnNone">Not verified</button>
+      <button id="scnFail">Fail 3 attempts</button>
+    </div>
+    <div class="right">
+      <span class="page-ind" id="pageInd">Page: <b>Verification</b></span>
+      <span class="lbl">Prototype — simulated data · read-only against production Genesys config</span>
+      <button class="reset" id="resetBtn">Reset</button>
+    </div>
+  </div>
+
+  <!-- ================ TOP CHROME ================ -->
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="logo">A</div>
+      <button class="menu-btn">☰&nbsp;Menu</button>
+    </div>
+    <div></div>
+    <div class="search">Search for pages, users, groups and locations</div>
+    <div class="top-actions">
+      <span class="pill">📞 Calls</span>
+      <span class="pill">✉ Inbox</span>
+      <span class="pill workspace">👥 Agent Workspace<span class="badge">1</span></span>
+      <span class="toggle">On Queue<span class="knob" aria-hidden="true"></span></span>
+      <span class="avatar">TB</span>
+    </div>
+  </header>
+
+  <!-- Interaction chip / call controls -->
+  <div class="chipbar">
+    <div class="call-chip">
+      <div class="ico">📞</div>
+      <div class="who">Mobile Number, Australia<small id="callTimer">05:59</small></div>
+    </div>
+    <div class="call-actions">
+      <button class="ctl" title="Keypad">▦</button>
+      <button class="ctl" title="Mute">🎤</button>
+      <button class="ctl" title="Hold">⏸</button>
+      <button class="ctl" title="Secure">🔒</button>
+      <button class="ctl" title="Transfer">⇄</button>
+      <button class="ctl" title="Consult">👥</button>
+      <button class="ctl" title="Conference">👤</button>
+      <button class="ctl hang" title="End">✂</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="win-controls"><span>—</span><span>×</span></div>
+  </div>
+
+  <!-- ================ 3-COLUMN WORKSPACE ================ -->
+  <div class="workspace">
+
+    <!-- LEFT: Conversations panel (unchanged) -->
+    <aside class="conv-panel">
+      <div class="conv-head">
+        <span>Conversations</span>
+        <span class="icons"><span>⚙</span><span>📞</span><span>✉</span><span>💬</span></span>
+      </div>
+      <div class="conv-card active">
+        <div class="title">Mobile Number, Australia</div>
+        <div class="queue">📞 EC PVE</div>
+      </div>
+    </aside>
+
+    <!-- CENTER: "Call Interaction" widget — CENTRAL PILLAR redesigned below -->
+    <main class="center-col">
+      <div class="widget">
+        <div class="widget-head">
+          <div class="title">📞 Call Interaction</div>
+          <div class="icons"><span>«</span><span>⤢</span><span>▭</span></div>
+        </div>
+
+        <!-- Top interaction table (unchanged — direct mapping to text + {{scripter.*}}) -->
+        <div class="txn-table">
+          <div class="txn-cell"><div class="lbl">| ID</div><div class="val">f7d9be12-94e6-47bf-bce9-5e27ad59132d</div></div>
+          <div class="txn-cell"><div class="lbl">| Queue</div><div class="val">EC PVE</div></div>
+          <div class="txn-cell"><div class="lbl">| Type</div><div class="val">Call</div></div>
+          <div class="txn-cell state"><div class="lbl">| State</div><div class="val">Connected</div></div>
+          <div class="txn-cell"><div class="lbl">| Duration</div><div class="val" id="topDuration">00:14:23</div></div>
+          <div class="txn-cell"><div class="lbl">| Number</div><div class="val">tel:+61431563191</div></div>
+        </div>
+
+        <!-- =============== REDESIGNED CENTRAL PILLAR (multi-page) =============== -->
+        <div class="pillar">
+
+          <!-- Attempt-counter chip: hidden until first failed attempt -->
+          <div id="attemptChip" class="attempt-chip hidden">
+            <span class="ico">↻</span>
+            <span id="attemptText">Verification attempt 1 of 3</span>
+          </div>
+
+          <!-- ================ PAGE 1: VERIFICATION ================ -->
+          <section id="page-verify" class="page">
+            <div class="verif">
+              <div class="verif-head">
+                <div class="title">🛡 Customer &amp; Account Verification</div>
+                <div id="verifStatus" class="status pending">Not verified</div>
+              </div>
+              <div id="verifBanner" class="banner warn">
+                <div class="ico">!</div>
+                <div><b>Verification required</b>Account context and servicing actions live on the next page — locked until verification passes. Page navigates automatically on success.</div>
+              </div>
+
+              <div class="verif-body">
+                <div class="two-col">
+                  <!-- Group 1: Identity check (Phone + DOB + Postcode) -->
+                  <div class="lookup-group">
+                    <h4>Search by identity check</h4>
+                    <div class="hint">Ask the customer for their number, birth day/month and postcode. Do not read stored values aloud.</div>
+                    <div class="fld">
+                      <label for="idPhone">Phone Number (eg. 0400 xxx…)</label>
+                      <input id="idPhone" autocomplete="off" placeholder="0412 345 821">
+                      <div class="prefill-note" id="phonePrefillNote">Pre-filled from caller ANI · overwrite if the customer offers a different number.</div>
+                    </div>
+                    <div class="fld"><label for="idDob">Birth Day and Month</label><input id="idDob" autocomplete="off" placeholder="14/08" maxlength="5"></div>
+                    <div class="fld"><label for="idPost">Postcode</label><input id="idPost" autocomplete="off" placeholder="3000" maxlength="4"></div>
+                    <div class="btn-row">
+                      <button class="btn primary" id="btnIdSearch">Verify identity check</button>
+                      <button class="btn link" id="btnFillIdDemo">Fill passing demo values</button>
+                    </div>
+                    <div class="primitive-note" style="margin-top:10px">Scripter mapping: phone <code>input</code> initialised from <code>{{scripter.callANI}}</code> on page-load via <em>Set Variable</em> · 3 × <code>input</code> bound to script variables · <code>button</code> invokes Data Action <code>CORE.searchCustomerByIdentityCheck</code> · attempt counter is a script variable incremented on fail; a Decision + <em>Change Page</em> action fires to <em>Unable to Verify</em> page on ≥ 3.</div>
+                  </div>
+
+                  <!-- Group 2: Direct account lookup -->
+                  <div class="lookup-group">
+                    <h4>Search by account number</h4>
+                    <div class="hint">Use when the customer can provide their account number directly.</div>
+                    <div class="fld"><label for="acctNum">Account Number (Required)</label><input id="acctNum" autocomplete="off" placeholder="e.g. 784204821"></div>
+                    <div class="btn-row">
+                      <button class="btn primary" id="btnAcctSearch">Search Multi Account Customer by Account Number</button>
+                    </div>
+                    <div class="primitive-note" style="margin-top:10px">Scripter mapping: <code>input</code> bound to variable · <code>button</code> invokes Data Action <code>CORE.searchAccount</code>. Account-number match must still be followed by identity confirmation before unlock.</div>
+                  </div>
+                </div>
+
+                <div id="searchResult" class="result hidden">
+                  <div class="r-title">Matching accounts</div>
+                  <table>
+                    <thead><tr><th>Account</th><th>Fuel</th><th>Postcode</th><th>Match</th><th></th></tr></thead>
+                    <tbody id="searchRows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Read-only IVR context on Verification page — BLANK when IVR did not validate -->
+            <div class="two-col">
+              <div>
+                <div class="section-band">Self-Service IVR</div>
+                <div class="section-body">
+                  <div class="kv" id="ivrKv">
+                    <div class="k">Is Customer Validated:</div><div class="v" data-ivr-key="validated">false</div>
+                    <div class="k">Phone Number:</div><div class="v" data-ivr-key="phone">—</div>
+                    <div class="k">Account Number:</div><div class="v" data-ivr-key="account">—</div>
+                    <div class="k">Fuel Type:</div><div class="v" data-ivr-key="fuel">—</div>
+                    <div class="k">Account Balance:</div><div class="v" data-ivr-key="balance">—</div>
+                    <div class="k">Family Violence Flag:</div><div class="v" data-ivr-key="fv">—</div>
+                    <div class="k">Exit Point:</div><div class="v" data-ivr-key="exitPoint">Agent-Assisted Request</div>
+                    <div class="k">Exit Reason:</div><div class="v" data-ivr-key="exitReason">Customer requested agent</div>
+                  </div>
+                  <div class="ivr-empty-note" id="ivrEmptyNote">
+                    <span class="ico">ⓘ</span>
+                    <span>IVR did not validate the customer, so no account-specific context was captured. Complete verification above to unlock account details on the next page.</span>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="section-band">Servicing (locked)</div>
+                <div class="section-body">
+                  <div class="service-locked-msg">
+                    <div class="ico">🔒</div>
+                    <div>
+                      <b>Servicing lives on the next page.</b>
+                      <div style="margin-top:4px;color:var(--muted);font-size:12px">Once verification passes, the widget navigates automatically to the Servicing page via a Genesys <em>Change Page</em> action bound to <code>{{verified}}</code>.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="notes-row">
+              <label for="notesVerify" style="font-weight:600;color:#243">Verification notes:</label>
+              <textarea id="notesVerify" placeholder="Optional — captured against the interaction even if verification is not completed"></textarea>
+              <div class="btn-row" style="align-items:flex-start"><button class="btn secondary" id="btnSaveVerifyNote">Save note</button></div>
+            </div>
+          </section>
+
+          <!-- ================ PAGE 2: SERVICING ================ -->
+          <section id="page-service" class="page hidden">
+            <div class="verified-strip" id="verifiedStrip">
+              <div class="v-left">
+                <span class="v-tick" id="stripTick">✓</span>
+                <div>
+                  <b id="stripTitle">Customer verified</b>
+                  <span>Source: <span id="stripSource">Self-service IVR</span> · Account <span id="stripAccount">784204821</span> · <span id="stripFuel">Electricity</span></span>
+                </div>
+              </div>
+              <div class="v-right">
+                <span class="v-tag" id="popTag">CORE screen-pop: pending…</span>
+                <button class="btn link" id="btnChangeCustomer">Change customer</button>
+              </div>
+            </div>
+
+            <div class="two-col">
+              <div>
+                <div class="section-band">Self-Service IVR</div>
+                <div class="section-body">
+                  <div class="kv">
+                    <div class="k">Is Customer Validated:</div><div class="v" id="sIvrValidated">true</div>
+                    <div class="k">Phone Number:</div><div class="v" id="sIvrPhone">0431 563 191</div>
+                    <div class="k">Account Number:</div><div class="v" id="sIvrAccount">784204821</div>
+                    <div class="k">Fuel Type:</div><div class="v" id="sIvrFuel">Electricity</div>
+                    <div class="k">Account Balance:</div><div class="v" id="sIvrBalance">$184.60</div>
+                    <div class="k">Family Violence Flag:</div><div class="v" id="sIvrFv">No</div>
+                    <div class="k">Exit Point:</div><div class="v">Agent-Assisted Request</div>
+                    <div class="k">Exit Reason:</div><div class="v">Customer requested agent</div>
+                  </div>
+                </div>
+                <div class="section-band" style="margin-top:12px">Payment IVR</div>
+                <div class="section-body">
+                  <div class="kv">
+                    <div class="k">Payment Account Number:</div><div class="v">—</div>
+                    <div class="k">Payment Amount:</div><div class="v">—</div>
+                    <div class="k">Payment Receipt Number:</div><div class="v">—</div>
+                  </div>
+                </div>
+                <div class="section-band" style="margin-top:12px">Other Enquiries NLU Data</div>
+                <div class="section-body">
+                  <div class="kv" style="grid-template-columns:170px 1fr">
+                    <div class="k">Customer Intent Detected:</div>
+                    <div class="v">Billing enquiry &nbsp;👍&nbsp;👎&nbsp;<span style="background:#e2f7d1;color:#3b6b19;padding:1px 6px;border-radius:3px;font-weight:700">Good</span></div>
+                    <div class="k">Customer Utterance:</div>
+                    <div class="v">"I want to check my last bill"</div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div class="service-list" id="serviceList">
+                  <div class="band">Agent-Assisted Payment</div>
+                  <button class="service-btn" id="btnPay">Initiate Payment</button>
+
+                  <div class="band" style="margin-top:6px">Agent-Assisted Direct Debit Registration</div>
+                  <button class="service-btn" id="btnDdr">Initiate Direct Debit Registration</button>
+
+                  <div class="band" style="margin-top:6px">Voice of Customer</div>
+                  <div class="kv" style="grid-template-columns:170px 1fr;padding:2px 0 6px">
+                    <div class="k">Customer Email Found:</div><div class="v">false</div>
+                    <div class="k">Opted out of surveys:</div><div class="v">false</div>
+                  </div>
+                  <button class="service-btn allow-restricted">Add Customer Details</button>
+                  <button class="service-btn orange">Opt Out of Surveys</button>
+
+                  <div class="band" style="margin-top:6px">Multi-Tiered Wrap Codes</div>
+                  <div class="primitive-note">Rendered by scripter <code>webPage</code> component (existing MTWC widget) — unchanged by this uplift.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="notes-row">
+              <label for="notesService" style="font-weight:600;color:#243">Additional Notes:</label>
+              <textarea id="notesService" placeholder="Agent notes — sent to CORE Sync when submitted"></textarea>
+              <div class="btn-row" style="align-items:flex-start"><button class="btn primary" id="btnSubmitService">Submit</button></div>
+            </div>
+          </section>
+
+          <!-- ================ PAGE 3: UNABLE TO VERIFY ================ -->
+          <section id="page-unable" class="page hidden">
+            <div class="unable-hero">
+              <div class="hero-icon">×</div>
+              <div>
+                <b>3 verification attempts exhausted</b>
+                <div class="body">Follow the approved unable-to-verify pathway. Choose one option below — the outcome is written to CORE Sync as an audit event and captured on the wrap code.</div>
+              </div>
+            </div>
+
+            <div class="section-band" style="margin-top:12px">Attempt history</div>
+            <div class="section-body">
+              <table class="attempts">
+                <thead><tr><th style="width:40px">#</th><th>Method</th><th>Result</th><th style="width:100px">Time</th></tr></thead>
+                <tbody id="attemptHistory"></tbody>
+              </table>
+            </div>
+
+            <div class="section-band" style="margin-top:12px">Choose an unable-to-verify pathway</div>
+            <div class="section-body">
+              <div class="unable-grid">
+                <button class="unable-card" id="uCardSms">
+                  <div class="hd">📱 Send verification link via SMS <span class="future-tag">Future</span></div>
+                  <div class="bd">One-time verification link sent to the caller's ANI. Customer completes verification themselves; agent re-checks status here. Requires a new CORE Data Action — logged as a nice-to-have.</div>
+                </button>
+                <button class="unable-card" id="uCardTransfer">
+                  <div class="hd">🔀 Transfer to Identity Recovery queue</div>
+                  <div class="bd">Use when fraud/identity-theft is suspected, or the customer cannot provide any of the required information. Warm-consult transfer.</div>
+                </button>
+                <button class="unable-card" id="uCardRestricted">
+                  <div class="hd">🔓 Continue as unverified general enquiry</div>
+                  <div class="bd">Handles account-agnostic requests only — general info, tariff explanations, complaints intake. Payment and DDR remain locked.</div>
+                </button>
+                <button class="unable-card danger" id="uCardEnd">
+                  <div class="hd">✂ End interaction with reason</div>
+                  <div class="bd">Ends the call with a mandatory wrap-code. Use as a last resort when no pathway above applies (e.g. customer disconnects, refuses to co-operate).</div>
+                </button>
+              </div>
+              <div class="primitive-note" style="margin-top:10px">Scripter mapping: each card is a native <code>button</code>. SMS button invokes a Data Action (future); Transfer uses the existing Genesys transfer control; Restricted routes to Servicing page with <code>{{restricted}}</code> flag set (disables non-general buttons); End fires the interaction-disconnect action with a wrap-code variable.</div>
+            </div>
+
+            <div class="notes-row">
+              <label for="notesUnable" style="font-weight:600;color:#243">Reason / handover notes:</label>
+              <textarea id="notesUnable" placeholder="Required — explain why the customer could not be verified and what was actioned"></textarea>
+              <div class="btn-row" style="align-items:flex-start"><button class="btn secondary" id="btnBackToVerify">Back to verification</button></div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- Scripter mapping summary -->
+      <div class="widget" style="margin-top:12px">
+        <div class="widget-head"><div class="title">ℹ Genesys Cloud scripter mapping (multi-page)</div></div>
+        <div style="padding:12px 14px;font-size:12.5px;color:#334;line-height:1.55">
+          Each of the three "pages" above corresponds to one native <b>scripter page</b>. Navigation between pages uses the built-in <b>Change Page</b> action.
+          Every interactive element remains expressible with primitives already used by
+          <b>EC PVE validation script</b> (<code>e476c138…3b</code>):
+          <ul style="margin:8px 0 0 18px;padding:0">
+            <li><b>Page 1 · Verification</b> — <code>verticalStackContainer</code>s of <code>input</code>+<code>button</code>. On page load: <em>Set Variable</em> writes <code>{{scripter.callANI}}</code> into <code>phone</code>. <em>Set Variable</em> also loads IVR context vars from flow (blank when IVR did not validate). Verify button invokes <code>CORE.searchCustomerByIdentityCheck</code>; a Decision + <em>Change Page → Servicing</em> fires on success. On failure, <code>{{attempts}}</code> is incremented; Decision fires <em>Change Page → Unable to Verify</em> when <code>{{attempts}} ≥ 3</code>.</li>
+            <li><b>Page 2 · Servicing</b> — verified strip uses interpolated <code>text</code> nodes. <em>Perform Screen Pop</em> action runs on page-load (native, already enabled on live script). Servicing <code>button</code>s (Initiate Payment / DDR / Add Customer Details) are the existing components. In restricted mode a script-variable <code>{{restricted}}</code> disables Payment + DDR (native <em>disabled = variable</em> binding).</li>
+            <li><b>Page 3 · Unable to Verify</b> — four <code>button</code>s in a stack: SMS (future Data Action), Transfer (existing Genesys transfer control), Continue-restricted (sets <code>{{restricted}}=true</code> and Change Page → Servicing), End (interaction disconnect action with wrap code).</li>
+            <li><b>MTWC panel</b> = existing <code>webPage</code> component — unchanged.</li>
+          </ul>
+          <div style="margin-top:8px;color:var(--muted)">No element requires a scripter feature not already in production use. The only new dependency is the future SMS-link Data Action (logged in Open Questions).</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT: Tools column (unchanged) -->
+    <aside class="tools-col">
+      <div class="tools-header">
+        <span>66</span>
+        <span class="icons"><span>📝</span><span>📅</span><span>📋</span></span>
+      </div>
+      <div style="align-self:flex-end;color:#334;font-weight:600">▤ Tools</div>
+      <div class="tools-empty">No tool is selected.<br>Please select one or<br>more from the available<br>tools.</div>
+    </aside>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const toast = (m, dur=1800) => { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), dur); };
+
+  // ----- Simulated Genesys data / Data-Action responses -----
+  const CALL_ANI      = '0431563191';                                        // {{scripter.callANI}}
+  const DEMO_ACCOUNT  = { number:'784204821', fuel:'Electricity', postcode:'3000', balance:'$184.60', fv:'No' };
+  const DEMO_MATCH    = { phone:'0412345821', dob:'14/08', postcode:'3000' };
+  const MAX_ATTEMPTS  = 3;
+
+  // IVR context — populated only when the IVR itself validated the caller
+  const IVR_VERIFIED_CTX = {
+    validated:'true', phone:'0431 563 191', account:'784204821',
+    fuel:'Electricity', balance:'$184.60', fv:'No',
+    exitPoint:'Agent-Assisted Request', exitReason:'Customer requested agent'
+  };
+  const IVR_EMPTY_CTX = {
+    validated:'false', phone:'0431 563 191', account:'—', fuel:'—',
+    balance:'—', fv:'—',
+    exitPoint:'Agent-Assisted Request', exitReason:'Customer requested agent'
+  };
+
+  const state = {
+    page:'verify',        // verify | service | unable
+    attempts:0,
+    source:'',            // 'Self-service IVR' | 'Agent-assisted (identity check)' | 'Unverified — restricted'
+    ivrValidated:false,   // simulates the IVR flow variable {{isCustomerValidated}}
+    forceFail:false,      // demo helper — makes verify always fail
+    attemptHistory:[]     // { method, result, time }
+  };
+
+  // ================= Page navigation =================
+  function goPage(name){
+    state.page = name;
+    ['verify','service','unable'].forEach(p => $('page-'+p).classList.toggle('hidden', p !== name));
+    $('pageInd').innerHTML = 'Page: <b>' + ({verify:'Verification', service:'Servicing', unable:'Unable to Verify'}[name]) + '</b>';
+    // Attempt chip only visible on Verification page
+    if (name !== 'verify') $('attemptChip').classList.add('hidden');
+    if (name === 'verify')  onEnterVerify();
+    if (name === 'service') onEnterService();
+    if (name === 'unable')  onEnterUnable();
+  }
+
+  // ================= Verification page =================
+  function formatAni(a){ return (a && a.length === 10) ? a.slice(0,4)+' '+a.slice(4,7)+' '+a.slice(7) : (a || ''); }
+
+  function paintIvrContext(ctx){
+    document.querySelectorAll('#ivrKv [data-ivr-key]').forEach(el => {
+      const k = el.dataset.ivrKey;
+      el.textContent = ctx[k] ?? '—';
+    });
+  }
+
+  function updateAttemptChip(){
+    const chip = $('attemptChip');
+    if (state.attempts === 0) { chip.classList.add('hidden'); return; }
+    chip.classList.remove('hidden');
+    const remaining = MAX_ATTEMPTS - state.attempts;
+    $('attemptText').textContent = 'Verification attempt ' + state.attempts + ' of ' + MAX_ATTEMPTS + (remaining <= 0 ? ' — no attempts remaining' : ' · ' + remaining + ' remaining');
+    chip.classList.toggle('exhausted', remaining <= 0);
+  }
+
+  function onEnterVerify(){
+    // Simulate scripter page-load Set Variable: phone := {{scripter.callANI}}
+    $('idPhone').value = formatAni(CALL_ANI);
+    $('idDob').value = '';
+    $('idPost').value = '';
+    $('acctNum').value = '';
+    $('searchResult').classList.add('hidden');
+    updateAttemptChip();
+    // IVR context is blank when IVR didn't validate — fixes the previous bug
+    paintIvrContext(state.ivrValidated ? IVR_VERIFIED_CTX : IVR_EMPTY_CTX);
+    $('ivrEmptyNote').style.display = state.ivrValidated ? 'none' : 'flex';
+    // Reset verify status label + banner (in case we came back from Unable)
+    $('verifStatus').className = 'status pending';
+    $('verifStatus').textContent = 'Not verified';
+    $('verifBanner').className = 'banner warn';
+    $('verifBanner').innerHTML = '<div class="ico">!</div><div><b>Verification required</b>Account context and servicing actions live on the next page — locked until verification passes. Page navigates automatically on success.</div>';
+  }
+
+  function recordAttempt(method, ok){
+    state.attempts++;
+    state.attemptHistory.push({
+      method,
+      result: ok ? 'Passed' : 'Failed — details did not match',
+      time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+    });
+    updateAttemptChip();
+    if (!ok && state.attempts >= MAX_ATTEMPTS) {
+      // Scripter mapping: Decision on {{attempts}} ≥ 3 → Change Page: Unable to Verify
+      setTimeout(() => goPage('unable'), 750);
+    }
+  }
+
+  // ================= Servicing page =================
+  function onEnterService(){
+    const isRestricted = state.source === 'Unverified — restricted';
+    const strip = $('verifiedStrip');
+    strip.classList.toggle('restricted', isRestricted);
+    $('serviceList').classList.toggle('restricted', isRestricted);
+
+    if (isRestricted) {
+      $('stripTick').textContent = '!';
+      $('stripTitle').textContent = 'Unverified — restricted servicing';
+      $('stripSource').textContent = 'No account context';
+      $('stripAccount').textContent = 'n/a';
+      $('stripFuel').textContent = 'general enquiries only';
+      $('popTag').textContent = 'CORE screen-pop skipped';
+      $('popTag').classList.remove('popped');
+      // Blank the account-context IVR values on servicing page in restricted mode
+      ['sIvrValidated','sIvrPhone','sIvrAccount','sIvrFuel','sIvrBalance','sIvrFv'].forEach(id => $(id).textContent = '—');
+      $('sIvrPhone').textContent = '0431 563 191'; // ANI still known
+      $('sIvrValidated').textContent = 'false';
+      return;
+    }
+
+    $('stripTick').textContent = '✓';
+    $('stripTitle').textContent = 'Customer verified';
+    $('stripSource').textContent = state.source || 'Self-service IVR';
+    $('stripAccount').textContent = DEMO_ACCOUNT.number;
+    $('stripFuel').textContent = DEMO_ACCOUNT.fuel;
+    // Populate account context — same values regardless of source once verified
+    $('sIvrValidated').textContent = 'true';
+    $('sIvrPhone').textContent = IVR_VERIFIED_CTX.phone;
+    $('sIvrAccount').textContent = DEMO_ACCOUNT.number;
+    $('sIvrFuel').textContent = DEMO_ACCOUNT.fuel;
+    $('sIvrBalance').textContent = DEMO_ACCOUNT.balance;
+    $('sIvrFv').textContent = DEMO_ACCOUNT.fv;
+
+    // Simulate CORE auto-pop on page load (native scripter Perform Screen Pop action)
+    $('popTag').textContent = 'Popping CORE…';
+    $('popTag').classList.remove('popped');
+    setTimeout(() => {
+      $('popTag').textContent = '✓ CORE screen-popped';
+      $('popTag').classList.add('popped');
+      toast('CORE auto-popped on Servicing page load · account ' + DEMO_ACCOUNT.number);
+    }, 550);
+  }
+
+  // ================= Unable-to-verify page =================
+  function onEnterUnable(){
+    const tbody = $('attemptHistory');
+    tbody.innerHTML = '';
+    if (!state.attemptHistory.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:8px">No attempt history captured (demo scenario opened directly).</td></tr>';
+      return;
+    }
+    state.attemptHistory.forEach((a, i) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td>'+(i+1)+'</td><td>'+a.method+'</td><td>'+a.result+'</td><td>'+a.time+'</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ================= Scenario controls =================
+  $('scnIvr').onclick   = () => { setActiveScn('ivr');   state.attempts=0; state.attemptHistory=[]; state.ivrValidated=true;  state.forceFail=false; state.source='Self-service IVR'; goPage('service'); toast('Scenario: IVR validated — landing directly on Servicing page'); };
+  $('scnNone').onclick  = () => { setActiveScn('none');  state.attempts=0; state.attemptHistory=[]; state.ivrValidated=false; state.forceFail=false; state.source=''; goPage('verify'); };
+  $('scnFail').onclick  = () => { setActiveScn('fail');  state.attempts=0; state.attemptHistory=[]; state.ivrValidated=false; state.forceFail=true;  state.source=''; goPage('verify'); toast('Scenario: any verification attempt will fail — three tries then Unable to Verify', 2400); };
+  $('resetBtn').onclick = () => { $('scnNone').click(); };
+  function setActiveScn(k){
+    ['scnIvr','scnNone','scnFail'].forEach(id => $(id).classList.remove('active'));
+    ({ ivr:'scnIvr', none:'scnNone', fail:'scnFail' })[k] && $({ ivr:'scnIvr', none:'scnNone', fail:'scnFail' }[k]).classList.add('active');
+  }
+
+  // ================= Identity check verification =================
+  $('btnFillIdDemo').onclick = () => {
+    $('idPhone').value = DEMO_MATCH.phone; $('idDob').value = DEMO_MATCH.dob; $('idPost').value = DEMO_MATCH.postcode;
+    toast('Demo passing values filled');
+  };
+
+  $('btnIdSearch').onclick = () => {
+    const phone = $('idPhone').value.replace(/\s+/g,'');
+    const dob   = $('idDob').value.trim();
+    const post  = $('idPost').value.trim();
+    if (!phone || !dob || !post) { toast('Enter all three fields'); return; }
+    const btn = $('btnIdSearch'); btn.disabled = true; btn.textContent = 'Verifying…';
+    setTimeout(() => {
+      btn.disabled = false; btn.textContent = 'Verify identity check';
+      const pass = !state.forceFail && phone === DEMO_MATCH.phone && dob === DEMO_MATCH.dob && post === DEMO_MATCH.postcode;
+      recordAttempt('Identity check', pass);
+      if (pass) {
+        state.source = 'Agent-assisted (identity check)';
+        $('verifStatus').className = 'status pass'; $('verifStatus').textContent = 'Verified';
+        toast('Verification passed — navigating to Servicing page…');
+        setTimeout(() => goPage('service'), 500);
+      } else if (state.attempts < MAX_ATTEMPTS) {
+        const remaining = MAX_ATTEMPTS - state.attempts;
+        $('verifStatus').className = 'status fail'; $('verifStatus').textContent = 'Attempt ' + state.attempts + ' failed';
+        $('verifBanner').className = 'banner fail';
+        $('verifBanner').innerHTML = '<div class="ico">×</div><div><b>Details did not match</b>' + remaining + ' attempt' + (remaining===1?'':'s') + ' remaining before the interaction moves to the Unable-to-Verify pathway.</div>';
+      }
+    }, 550);
+  };
+
+  // ================= Account-number search =================
+  $('btnAcctSearch').onclick = () => {
+    const acct = $('acctNum').value.trim();
+    if (!acct) { toast('Enter an account number'); return; }
+    const btn = $('btnAcctSearch'); btn.disabled = true; btn.textContent = 'Searching…';
+    setTimeout(() => {
+      btn.disabled = false; btn.textContent = 'Search Multi Account Customer by Account Number';
+      renderSearchRows(acct);
+    }, 500);
+  };
+  function renderSearchRows(acct){
+    const tbody = $('searchRows'); tbody.innerHTML = '';
+    const matches = (acct === DEMO_ACCOUNT.number)
+      ? [DEMO_ACCOUNT, { number:'784207714', fuel:'Gas', postcode:'3000', balance:'$52.10', fv:'No' }]
+      : [];
+    if (!matches.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No accounts match. Ask customer to confirm the number, or switch to identity check.</td></tr>';
+    } else {
+      matches.forEach(m => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td><b>'+m.number+'</b></td><td>'+m.fuel+'</td><td>'+m.postcode+'</td><td>Account only — identity not yet confirmed</td><td class="action"><button class="btn secondary" data-acct="'+m.number+'">Select &amp; continue to identity check</button></td>';
+        tbody.appendChild(tr);
+      });
+    }
+    $('searchResult').classList.remove('hidden');
+    tbody.querySelectorAll('button[data-acct]').forEach(b => b.onclick = () => toast('Account '+b.dataset.acct+' selected — enter identity-check details to unlock servicing'));
+  }
+
+  // ================= Servicing page actions =================
+  $('btnPay').onclick            = () => toast('Initiate Payment (simulated)');
+  $('btnDdr').onclick            = () => toast('Initiate Direct Debit Registration (simulated)');
+  $('btnChangeCustomer').onclick = () => { state.attempts=0; state.attemptHistory=[]; state.ivrValidated=false; state.source=''; goPage('verify'); toast('Customer unlinked — return to Verification page'); };
+  $('btnSubmitService').onclick  = () => toast('Interaction submitted → CORE Sync (simulated)');
+  $('btnSaveVerifyNote').onclick = () => toast('Verification note saved against interaction');
+
+  // ================= Unable-to-verify actions =================
+  $('uCardSms').onclick        = () => toast('Send verification link SMS — FUTURE capability (requires new Data Action)', 2600);
+  $('uCardTransfer').onclick   = () => toast('Warm-consult transfer to Identity Recovery queue (simulated)');
+  $('uCardRestricted').onclick = () => { state.source='Unverified — restricted'; state.ivrValidated=false; toast('Continue as unverified — restricted subset only'); goPage('service'); };
+  $('uCardEnd').onclick        = () => toast('Interaction ended with wrap code (simulated)');
+  $('btnBackToVerify').onclick = () => { state.attempts=0; state.attemptHistory=[]; goPage('verify'); toast('Attempts reset — back to Verification page'); };
+
+  // ================= Ticking timer =================
+  let secs = 14*60 + 23;
+  setInterval(() => {
+    secs++;
+    const h = String(Math.floor(secs/3600)).padStart(2,'0');
+    const m = String(Math.floor((secs%3600)/60)).padStart(2,'0');
+    const s = String(secs%60).padStart(2,'0');
+    $('topDuration').textContent = h+':'+m+':'+s;
+    $('callTimer').textContent = (Math.floor(secs/60)) + ':' + s;
+  }, 1000);
+
+  // ================= Init =================
+  setActiveScn('none');
+  goPage('verify');
+})();
+</script>
+</body>
+</html>
