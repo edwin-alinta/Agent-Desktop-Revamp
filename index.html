@@ -387,7 +387,7 @@
                     <div class="fld"><label for="idDob">Birth Day and Month</label><input id="idDob" autocomplete="off" placeholder="14/08" maxlength="5"></div>
                     <div class="fld"><label for="idPost">Postcode</label><input id="idPost" autocomplete="off" placeholder="3000" maxlength="4"></div>
                     <div class="btn-row">
-                      <button class="btn primary" id="btnIdSearch">Verify identity check</button>
+                      <button class="btn primary" id="btnIdSearch">Search accounts</button>
                       <button class="btn link" id="btnFillIdDemo">Fill passing demo values</button>
                     </div>
                     <div class="primitive-note" style="margin-top:10px">Scripter mapping: phone <code>input</code> initialised from <code>{{scripter.callANI}}</code> on page-load via <em>Set Variable</em> · 3 × <code>input</code> bound to script variables · <code>button</code> invokes Data Action <code>CORE.searchCustomerByIdentityCheck</code> · attempt counter is a script variable incremented on fail; a Decision + <em>Change Page</em> action fires to <em>Unable to Verify</em> page on ≥ 3.</div>
@@ -408,7 +408,7 @@
                 <div id="searchResult" class="result hidden">
                   <div class="r-title">Matching accounts</div>
                   <table>
-                    <thead><tr><th>Account</th><th>Fuel</th><th>Postcode</th><th>Match</th><th></th></tr></thead>
+                    <thead><tr><th>Account</th><th>Primary account holder</th><th>Phone number</th><th>DOB</th><th>Postcode</th><th>Fuel</th><th></th></tr></thead>
                     <tbody id="searchRows"></tbody>
                   </table>
                 </div>
@@ -625,9 +625,17 @@
 
   // ----- Simulated Genesys data / Data-Action responses -----
   const CALL_ANI      = '0431563191';                                        // {{scripter.callANI}}
-  const DEMO_ACCOUNT  = { number:'784204821', fuel:'Electricity', postcode:'3000', balance:'$184.60', fv:'No' };
+  const DEMO_ACCOUNT  = { number:'784204821', holder:'Sarah Thompson', phone:'0431 563 191', dob:'14/08/1986', fuel:'Electricity', postcode:'3000', balance:'$184.60', fv:'No' };
   const DEMO_MATCH    = { phone:'0412345821', dob:'14/08', postcode:'3000' };
   const MAX_ATTEMPTS  = 3;
+
+  // Account-number search returns exactly ONE unique record (account numbers are unique).
+  const ACCOUNT_RECORD = { number:'784204821', holder:'Sarah Thompson', phone:'0412 345 821', dob:'14/08/1986', fuel:'Electricity', postcode:'3000', balance:'$184.60', fv:'No' };
+  // Identity-check search (phone + DOB + postcode) can return MULTIPLE accounts for the same person.
+  const IDENTITY_MATCHES = [
+    { number:'784204821', holder:'Sarah Thompson', phone:'0412 345 821', dob:'14/08/1986', fuel:'Electricity', postcode:'3000', balance:'$184.60', fv:'No' },
+    { number:'784207714', holder:'Sarah Thompson', phone:'0412 345 821', dob:'14/08/1986', fuel:'Gas',         postcode:'3000', balance:'$52.10',  fv:'No' }
+  ];
 
   // IVR context — populated only when the IVR itself validated the caller
   const IVR_VERIFIED_CTX = {
@@ -647,6 +655,7 @@
     source:'',            // 'Self-service IVR' | 'Agent-assisted (identity check)' | 'Unverified — restricted'
     ivrValidated:false,   // simulates the IVR flow variable {{isCustomerValidated}}
     forceFail:false,      // demo helper — makes verify always fail
+    selectedAccount:null, // the record the agent confirmed from the Matching accounts table
     attemptHistory:[]     // { method, result, time }
   };
 
@@ -688,6 +697,8 @@
     $('idPost').value = '';
     $('acctNum').value = '';
     $('searchResult').classList.add('hidden');
+    $('searchRows').innerHTML = '';
+    state.selectedAccount = null;
     updateAttemptChip();
     // IVR context is blank when IVR didn't validate — fixes the previous bug
     paintIvrContext(state.ivrValidated ? IVR_VERIFIED_CTX : IVR_EMPTY_CTX);
@@ -735,18 +746,21 @@
       return;
     }
 
+    // Use the account the agent confirmed from the Matching accounts table (if any),
+    // otherwise fall back to the IVR-verified account context.
+    const acct = state.selectedAccount || DEMO_ACCOUNT;
     $('stripTick').textContent = '✓';
     $('stripTitle').textContent = 'Customer verified';
     $('stripSource').textContent = state.source || 'Self-service IVR';
-    $('stripAccount').textContent = DEMO_ACCOUNT.number;
-    $('stripFuel').textContent = DEMO_ACCOUNT.fuel;
-    // Populate account context — same values regardless of source once verified
+    $('stripAccount').textContent = acct.number;
+    $('stripFuel').textContent = acct.fuel;
+    // Populate account context — reflects the confirmed record
     $('sIvrValidated').textContent = 'true';
-    $('sIvrPhone').textContent = IVR_VERIFIED_CTX.phone;
-    $('sIvrAccount').textContent = DEMO_ACCOUNT.number;
-    $('sIvrFuel').textContent = DEMO_ACCOUNT.fuel;
-    $('sIvrBalance').textContent = DEMO_ACCOUNT.balance;
-    $('sIvrFv').textContent = DEMO_ACCOUNT.fv;
+    $('sIvrPhone').textContent = acct.phone || IVR_VERIFIED_CTX.phone;
+    $('sIvrAccount').textContent = acct.number;
+    $('sIvrFuel').textContent = acct.fuel;
+    $('sIvrBalance').textContent = acct.balance;
+    $('sIvrFv').textContent = acct.fv;
 
     // Simulate CORE auto-pop on page load (native scripter Perform Screen Pop action)
     $('popTag').textContent = 'Popping CORE…';
@@ -754,7 +768,7 @@
     setTimeout(() => {
       $('popTag').textContent = '✓ CORE screen-popped';
       $('popTag').classList.add('popped');
-      toast('CORE auto-popped on Servicing page load · account ' + DEMO_ACCOUNT.number);
+      toast('CORE auto-popped on Servicing page load · account ' + acct.number);
     }, 550);
   }
 
@@ -794,21 +808,17 @@
     const dob   = $('idDob').value.trim();
     const post  = $('idPost').value.trim();
     if (!phone || !dob || !post) { toast('Enter all three fields'); return; }
-    const btn = $('btnIdSearch'); btn.disabled = true; btn.textContent = 'Verifying…';
+    const btn = $('btnIdSearch'); btn.disabled = true; btn.textContent = 'Searching…';
     setTimeout(() => {
-      btn.disabled = false; btn.textContent = 'Verify identity check';
-      const pass = !state.forceFail && phone === DEMO_MATCH.phone && dob === DEMO_MATCH.dob && post === DEMO_MATCH.postcode;
-      recordAttempt('Identity check', pass);
-      if (pass) {
-        state.source = 'Agent-assisted (identity check)';
-        $('verifStatus').className = 'status pass'; $('verifStatus').textContent = 'Verified';
-        toast('Verification passed — navigating to Servicing page…');
-        setTimeout(() => goPage('service'), 500);
-      } else if (state.attempts < MAX_ATTEMPTS) {
-        const remaining = MAX_ATTEMPTS - state.attempts;
-        $('verifStatus').className = 'status fail'; $('verifStatus').textContent = 'Attempt ' + state.attempts + ' failed';
-        $('verifBanner').className = 'banner fail';
-        $('verifBanner').innerHTML = '<div class="ico">×</div><div><b>Details did not match</b>' + remaining + ' attempt' + (remaining===1?'':'s') + ' remaining before the interaction moves to the Unable-to-Verify pathway.</div>';
+      btn.disabled = false; btn.textContent = 'Search accounts';
+      // Identity-check search can return MULTIPLE matching accounts for the same person.
+      const found = !state.forceFail && phone === DEMO_MATCH.phone && dob === DEMO_MATCH.dob && post === DEMO_MATCH.postcode;
+      if (found) {
+        renderSearchRows(IDENTITY_MATCHES, 'Agent-assisted (identity check)');
+        toast('Match found — confirm the correct account to complete verification');
+      } else {
+        renderSearchRows([], 'Agent-assisted (identity check)');
+        handleNoMatch('Identity check');
       }
     }, 550);
   };
@@ -820,31 +830,62 @@
     const btn = $('btnAcctSearch'); btn.disabled = true; btn.textContent = 'Searching…';
     setTimeout(() => {
       btn.disabled = false; btn.textContent = 'Search Multi Account Customer by Account Number';
-      renderSearchRows(acct);
+      // An account number is unique, so this search returns at most ONE record.
+      const match = (acct === DEMO_ACCOUNT.number) ? [ACCOUNT_RECORD] : [];
+      if (match.length) {
+        renderSearchRows(match, 'Agent-assisted (account number)');
+        toast('Account found — confirm identity to complete verification');
+      } else {
+        renderSearchRows([], 'Agent-assisted (account number)');
+        handleNoMatch('Account number');
+      }
     }, 500);
   };
-  function renderSearchRows(acct){
+
+  // Shared renderer for the "Matching accounts" table — used by both search modes.
+  // Each row carries a "Confirm Identity verified" CTA that verifies the customer
+  // and navigates to the Servicing (verified) page.
+  function renderSearchRows(matches, sourceLabel){
     const tbody = $('searchRows'); tbody.innerHTML = '';
-    const matches = (acct === DEMO_ACCOUNT.number)
-      ? [DEMO_ACCOUNT, { number:'784207714', fuel:'Gas', postcode:'3000', balance:'$52.10', fv:'No' }]
-      : [];
     if (!matches.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:8px">No accounts match. Ask customer to confirm the number, or switch to identity check.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:8px">No accounts match. Confirm the customer\'s details, or try the other search method.</td></tr>';
     } else {
-      matches.forEach(m => {
+      matches.forEach((m, i) => {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td><b>'+m.number+'</b></td><td>'+m.fuel+'</td><td>'+m.postcode+'</td><td>Account only — identity not yet confirmed</td><td class="action"><button class="btn secondary" data-acct="'+m.number+'">Select &amp; continue to identity check</button></td>';
+        tr.innerHTML = '<td><b>'+m.number+'</b></td><td>'+m.holder+'</td><td>'+m.phone+'</td><td>'+m.dob+'</td><td>'+m.postcode+'</td><td>'+m.fuel+'</td>'
+          + '<td class="action"><button class="btn primary" data-idx="'+i+'">Confirm Identity verified</button></td>';
         tbody.appendChild(tr);
       });
     }
     $('searchResult').classList.remove('hidden');
-    tbody.querySelectorAll('button[data-acct]').forEach(b => b.onclick = () => toast('Account '+b.dataset.acct+' selected — enter identity-check details to unlock servicing'));
+    tbody.querySelectorAll('button[data-idx]').forEach(b => b.onclick = () => confirmVerified(matches[+b.dataset.idx], sourceLabel));
+  }
+
+  // Agent confirms the correct record → customer is verified → go to Servicing page.
+  function confirmVerified(record, sourceLabel){
+    state.selectedAccount = record;
+    state.source = sourceLabel;
+    recordAttempt(sourceLabel.indexOf('account number') > -1 ? 'Account number' : 'Identity check', true);
+    $('verifStatus').className = 'status pass'; $('verifStatus').textContent = 'Verified';
+    toast('Identity confirmed for account ' + record.number + ' — navigating to Servicing page…');
+    setTimeout(() => goPage('service'), 450);
+  }
+
+  // No matching account — count a failed attempt and surface the remaining-attempts banner.
+  function handleNoMatch(method){
+    recordAttempt(method, false);
+    if (state.attempts < MAX_ATTEMPTS) {
+      const remaining = MAX_ATTEMPTS - state.attempts;
+      $('verifStatus').className = 'status fail'; $('verifStatus').textContent = 'Attempt ' + state.attempts + ' failed';
+      $('verifBanner').className = 'banner fail';
+      $('verifBanner').innerHTML = '<div class="ico">×</div><div><b>No matching account found</b>' + remaining + ' attempt' + (remaining===1?'':'s') + ' remaining before the interaction moves to the Unable-to-Verify pathway.</div>';
+    }
   }
 
   // ================= Servicing page actions =================
   $('btnPay').onclick            = () => toast('Initiate Payment (simulated)');
   $('btnDdr').onclick            = () => toast('Initiate Direct Debit Registration (simulated)');
-  $('btnChangeCustomer').onclick = () => { state.attempts=0; state.attemptHistory=[]; state.ivrValidated=false; state.source=''; goPage('verify'); toast('Customer unlinked — return to Verification page'); };
+  $('btnChangeCustomer').onclick = () => { state.attempts=0; state.attemptHistory=[]; state.ivrValidated=false; state.source=''; state.selectedAccount=null; goPage('verify'); toast('Customer unlinked — return to Verification page'); };
   $('btnSubmitService').onclick  = () => toast('Interaction submitted → CORE Sync (simulated)');
   $('btnSaveVerifyNote').onclick = () => toast('Verification note saved against interaction');
 
